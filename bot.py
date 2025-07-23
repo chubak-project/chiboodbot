@@ -1,0 +1,107 @@
+import os
+import requests
+import json
+from telegram import Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+
+# تنظیمات توکن‌ها (بعداً پر می‌کنیم)
+TELEGRAM_TOKEN = "8122340396:AAHlnHpKRTEAseFox0taSL3AeE9Rey8JpVs"
+ACR_HOST = "identify-eu-west-1.acrcloud.com"
+ACR_KEY = "99fef4750662f696546897087edc5e67"
+ACR_SECRET = "rkoP16KtCwYH0VA9hwHxXkwPuMVO7jUHaTCg7GOl"
+
+# --- تشخیص آهنگ با ACRCloud ---
+def recognize_audio(file_path):
+    try:
+        url = f"https://{ACR_HOST}/v1/identify"
+        headers = {
+            "access-key": ACR_KEY,
+            "access-secret": ACR_SECRET,
+            "content-type": "audio/mpeg"
+        }
+        
+        with open(file_path, 'rb') as audio_file:
+            response = requests.post(url, headers=headers, data=audio_file.read())
+        
+        result = json.loads(response.text)
+        
+        if result['status']['msg'] == 'Success':
+            music = result['metadata']['music'][0]
+            title = music['title']
+            artist = music['artists'][0]['name']
+            return f"🎵 آهنگ: {title}\n👤 هنرمند: {artist}"
+        else:
+            return "آهنگ تشخیص داده نشد! لطفاً یه تیکه بلندتر بفرست"
+            
+    except Exception as e:
+        return f"خطا: {str(e)}"
+
+# --- جستجوی آهنگ در یوتیوب ---
+def search_youtube(query):
+    try:
+        url = f"https://www.youtube.com/results?search_query={query.replace(' ', '+')}"
+        return f"🔍 نتایج جستجو:\n{url}"
+    except:
+        return "خطا در جستجو"
+
+# --- دستور /start ---
+def start(update: Update, context: CallbackContext):
+    update.message.reply_text(
+        "سلام! من بات تشخیص موزیک و فیلمم! 😊\n\n"
+        "می‌تونی:\n"
+        "1. یه ویس از آهنگ برام بفرستی\n"
+        "2. اسم آهنگ یا خواننده رو بنویسی\n"
+        "3. لینک اینستاگرام یه ویدیو بفرستی\n\n"
+        "من سعی می‌کنم آهنگ یا فیلم رو تشخیص بدم!"
+    )
+
+# --- پردازش پیام‌های متنی ---
+def handle_text(update: Update, context: CallbackContext):
+    text = update.message.text
+    
+    # اگر کاربر اسم آهنگ رو فرستاده
+    if "http" not in text:
+        result = search_youtube(text)
+        update.message.reply_text(result)
+    
+    # اگر لینک اینستاگرام فرستاده
+    elif "instagram.com" in text:
+        update.message.reply_text("در حال پردازش لینک اینستاگرام...")
+        # اینجا کد تشخیص فیلم رو بعداً اضافه می‌کنیم
+        update.message.reply_text("⏳ این قابلیت در حال توسعه است!")
+
+# --- پردازش ویس و فایل صوتی ---
+def handle_voice(update: Update, context: CallbackContext):
+    voice = update.message.voice
+    file = voice.get_file()
+    file.download("user_audio.mp3")
+    
+    result = recognize_audio("user_audio.mp3")
+    update.message.reply_text(result)
+
+# --- تنظیمات اصلی بات ---
+def main():
+    updater = Updater(TELEGRAM_TOKEN, use_context=True)
+    dp = updater.dispatcher
+
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(MessageHandler(Filters.voice, handle_voice))
+    
+    # تنظیمات وب‌هوک برای Railway
+    PORT = int(os.environ.get("PORT", 5000))
+    DOMAIN = os.environ.get("RAILWAY_STATIC_URL")  # این خط اضافه شد!
+    
+    updater.start_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"https://{DOMAIN}/{TELEGRAM_TOKEN}" if DOMAIN else None
+    )
+    
+    if not DOMAIN:
+        updater.start_polling()
+        
+    updater.idle()
+
+if __name__ == "__main__":
+    main()
